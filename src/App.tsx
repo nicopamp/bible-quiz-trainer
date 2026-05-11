@@ -39,6 +39,8 @@ type QuizState = {
 }
 
 const STORAGE_KEY = 'bible-quiz-acts-kjv-progress-v1'
+const AUTH_COOLDOWN_KEY = 'bible-quiz-auth-magic-link-cooldown-v1'
+const MAGIC_LINK_COOLDOWN_MS = 65_000
 const chapters = Array.from({ length: 9 }, (_, index) => index + 1)
 const learnStages: Array<{ stage: LearnStage; label: string }> = [
   { stage: 'read', label: 'Read' },
@@ -201,6 +203,11 @@ function getMagicLinkRedirectUrl() {
   return new URL(import.meta.env.BASE_URL, window.location.origin).toString()
 }
 
+function loadAuthCooldownUntil() {
+  const value = Number(localStorage.getItem(AUTH_COOLDOWN_KEY) ?? 0)
+  return Number.isFinite(value) ? value : 0
+}
+
 function App() {
   const [progress, setProgress] = useState(loadProgress)
   const [session, setSession] = useState<Session | null>(null)
@@ -210,6 +217,8 @@ function App() {
   const [authEmail, setAuthEmail] = useState('')
   const [authError, setAuthError] = useState<string | null>(null)
   const [authNotice, setAuthNotice] = useState<string | null>(null)
+  const [authCooldownUntil, setAuthCooldownUntil] = useState(loadAuthCooldownUntil)
+  const [now, setNow] = useState(() => Date.now())
   const [isCloudReady, setIsCloudReady] = useState(false)
   const skipNextCloudSave = useRef(false)
   const pendingDeletedVerseIds = useRef<string[]>([])
@@ -226,6 +235,8 @@ function App() {
 
   const selectedChapter = progress.selectedChapter
   const mode = progress.mode
+  const authCooldownSeconds = Math.max(0, Math.ceil((authCooldownUntil - now) / 1000))
+  const isAuthCoolingDown = authCooldownSeconds > 0
 
   const chapterVerses = useMemo(
     () => actsKjv.filter((verse) => verse.chapter === selectedChapter),
@@ -277,6 +288,13 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(progress))
   }, [progress])
+
+  useEffect(() => {
+    if (!isAuthCoolingDown) return
+
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [isAuthCoolingDown])
 
   useEffect(() => {
     if (!supabase) return
@@ -416,6 +434,10 @@ function App() {
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!supabase) return
+    if (isAuthCoolingDown) {
+      setAuthNotice(`A sign-in link was already requested. Try again in ${authCooldownSeconds}s.`)
+      return
+    }
 
     setAuthError(null)
     setAuthNotice(null)
@@ -429,13 +451,21 @@ function App() {
     })
 
     if (error) {
+      const cooldownUntil = Date.now() + MAGIC_LINK_COOLDOWN_MS
+      localStorage.setItem(AUTH_COOLDOWN_KEY, String(cooldownUntil))
+      setAuthCooldownUntil(cooldownUntil)
+      setNow(Date.now())
       setSyncStatus(session ? 'error' : 'local')
       setAuthError(authErrorMessage(error))
       return
     }
 
+    const cooldownUntil = Date.now() + MAGIC_LINK_COOLDOWN_MS
+    localStorage.setItem(AUTH_COOLDOWN_KEY, String(cooldownUntil))
+    setAuthCooldownUntil(cooldownUntil)
+    setNow(Date.now())
     setSyncStatus('local')
-    setAuthNotice('Check your email for a sign-in link.')
+    setAuthNotice('Check your email for a sign-in link. You can request another in about a minute.')
   }
 
   async function signOut() {
@@ -712,6 +742,7 @@ function App() {
           isConfigured={isSupabaseConfigured}
           email={session?.user.email ?? null}
           authEmail={authEmail}
+          authCooldownSeconds={authCooldownSeconds}
           syncStatus={syncStatus}
           error={authError}
           notice={authNotice}
@@ -891,6 +922,7 @@ function AccountPanel({
   isConfigured,
   email,
   authEmail,
+  authCooldownSeconds,
   syncStatus,
   error,
   notice,
@@ -902,6 +934,7 @@ function AccountPanel({
   isConfigured: boolean
   email: string | null
   authEmail: string
+  authCooldownSeconds: number
   syncStatus: SyncStatus
   error: string | null
   notice: string | null
@@ -910,6 +943,7 @@ function AccountPanel({
   onSignOut: () => void
   onImport: () => void
 }) {
+  const isCoolingDown = authCooldownSeconds > 0
   return (
     <section className="control-group account-panel" aria-labelledby="account-heading">
       <div className="account-heading-row">
@@ -953,8 +987,10 @@ function AccountPanel({
               required
             />
           </label>
-          <button type="submit" className="primary full-width">
-            Email Me a Sign-In Link
+          <button type="submit" className="primary full-width" disabled={isCoolingDown}>
+            {isCoolingDown
+              ? `Try Again in ${authCooldownSeconds}s`
+              : 'Email Me a Sign-In Link'}
           </button>
         </form>
       )}
