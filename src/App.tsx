@@ -204,6 +204,7 @@ function App() {
   const [progress, setProgress] = useState(loadProgress)
   const [learnIndex, setLearnIndex] = useState(0)
   const [learnOrder, setLearnOrder] = useState<LearnOrder>('sequential')
+  const [learnHistory, setLearnHistory] = useState<string[]>([])
   const [learnQueue, setLearnQueue] = useState<string[]>([])
   const [queue, setQueue] = useState<string[]>([])
   const [activeVerseId, setActiveVerseId] = useState<string | null>(null)
@@ -297,6 +298,7 @@ function App() {
     const nextChapterVerses = actsKjv.filter((verse) => verse.chapter === chapter)
     updateProgress((current) => ({ ...current, selectedChapter: chapter }))
     setLearnIndex(0)
+    setLearnHistory([])
     setLearnQueue([])
     setQueue([])
     setActiveVerseId(
@@ -313,6 +315,7 @@ function App() {
   function selectMode(nextMode: StudyMode) {
     updateProgress((current) => ({ ...current, mode: nextMode }))
     setLearnIndex(0)
+    setLearnHistory([])
     setLearnQueue([])
     setQueue([])
     setActiveVerseId(
@@ -327,13 +330,16 @@ function App() {
   }
 
   function selectLearnOrder(nextOrder: LearnOrder) {
+    if (nextOrder === learnOrder) return
+    const currentVerse = activeVerse ?? chapterVerses[learnIndex] ?? chapterVerses[0]
     setLearnOrder(nextOrder)
-    setLearnIndex(0)
     setLearnQueue([])
-    setActiveVerseId(nextOrder === 'random' ? shuffle(chapterVerses)[0]?.id ?? null : null)
-    setIsRevealed(false)
-    setLearnStage('read')
-    setReferenceGuess('')
+    if (nextOrder === 'random') {
+      setActiveVerseId(currentVerse?.id ?? null)
+      return
+    }
+    setLearnIndex(Math.max(0, chapterVerses.findIndex((verse) => verse.id === currentVerse?.id)))
+    setActiveVerseId(null)
   }
 
   function buildQueue(targetMode = mode) {
@@ -368,8 +374,41 @@ function App() {
             (verse) => verse.id,
           )
     const [nextVerseId, ...rest] = remainingQueue
+    if (activeVerseId) {
+      setLearnHistory((current) => [...current.slice(-24), activeVerseId])
+    }
     setLearnQueue(rest)
     setActiveVerseId(nextVerseId ?? chapterVerses[0]?.id ?? null)
+    setIsRevealed(false)
+    setLearnStage('read')
+  }
+
+  function goToLearnVerse(verseId: string) {
+    const targetIndex = chapterVerses.findIndex((verse) => verse.id === verseId)
+    if (targetIndex < 0) return
+    if (learnOrder === 'random' && activeVerseId && activeVerseId !== verseId) {
+      setLearnHistory((current) => [...current.slice(-24), activeVerseId])
+    }
+    if (learnOrder === 'random') {
+      setActiveVerseId(verseId)
+    } else {
+      setLearnIndex(targetIndex)
+    }
+    setIsRevealed(false)
+    setLearnStage('read')
+  }
+
+  function goToPreviousLearnVerse() {
+    if (learnOrder === 'random') {
+      const previousVerseId = learnHistory[learnHistory.length - 1]
+      if (!previousVerseId) return
+      setLearnHistory((current) => current.slice(0, -1))
+      setActiveVerseId(previousVerseId)
+      setIsRevealed(false)
+      setLearnStage('read')
+      return
+    }
+    setLearnIndex((index) => Math.max(0, index - 1))
     setIsRevealed(false)
     setLearnStage('read')
   }
@@ -565,8 +604,6 @@ function App() {
       </aside>
 
       <section className="study-area" aria-live="polite">
-        <Dashboard dashboard={dashboard} onReview={startBestReview} />
-
         {mode === 'quiz' && (
           <QuizPrepCard
             state={quizState ?? createQuizState(chapterVerses)}
@@ -608,19 +645,14 @@ function App() {
                 total={chapterVerses.length}
                 isRevealed={isRevealed}
                 order={learnOrder}
+                verses={chapterVerses}
+                canGoPrevious={learnOrder === 'sequential' ? learnIndex > 0 : learnHistory.length > 0}
                 stage={learnStage}
                 onStageChange={setLearnStage}
                 onOrderChange={selectLearnOrder}
+                onSelectVerse={goToLearnVerse}
                 onReveal={() => setIsRevealed(true)}
-                onPrevious={() => {
-                  if (learnOrder === 'random') {
-                    pickNextLearnVerse()
-                  } else {
-                    setLearnIndex((index) => Math.max(0, index - 1))
-                  }
-                  setIsRevealed(false)
-                  setLearnStage('read')
-                }}
+                onPrevious={goToPreviousLearnVerse}
                 onNext={() => {
                   if (learnOrder === 'random') {
                     pickNextLearnVerse()
@@ -669,6 +701,8 @@ function App() {
             )}
           </article>
         )}
+
+        <ChapterProgress dashboard={dashboard} onReview={startBestReview} />
       </section>
     </main>
   )
@@ -682,7 +716,7 @@ function modeLabel(mode: StudyMode) {
   return 'Chapter Review'
 }
 
-function Dashboard({
+function ChapterProgress({
   dashboard,
   onReview,
 }: {
@@ -699,7 +733,6 @@ function Dashboard({
   return (
     <section className="dashboard" aria-label="Chapter progress">
       <div>
-        <span className="eyebrow">Dashboard</span>
         <h2>Chapter progress</h2>
         <p className="section-help">
           Begin with Learn, then let Review Next pull the verse that needs the most attention.
@@ -903,9 +936,12 @@ function LearnCard({
   total,
   isRevealed,
   order,
+  verses,
+  canGoPrevious,
   stage,
   onStageChange,
   onOrderChange,
+  onSelectVerse,
   onReveal,
   onPrevious,
   onNext,
@@ -915,9 +951,12 @@ function LearnCard({
   total: number
   isRevealed: boolean
   order: LearnOrder
+  verses: ScriptureVerse[]
+  canGoPrevious: boolean
   stage: LearnStage
   onStageChange: (stage: LearnStage) => void
   onOrderChange: (order: LearnOrder) => void
+  onSelectVerse: (verseId: string) => void
   onReveal: () => void
   onPrevious: () => void
   onNext: () => void
@@ -965,15 +1004,34 @@ function LearnCard({
           ))}
         </div>
       </div>
+      <div className="verse-navigator" aria-label="Jump to a verse in this chapter">
+        <div>
+          <span>Jump to verse</span>
+          <strong>{verse.reference}</strong>
+        </div>
+        <div className="verse-jump-grid">
+          {verses.map((item) => (
+            <button
+              type="button"
+              className={item.id === verse.id ? 'selected' : ''}
+              onClick={() => onSelectVerse(item.id)}
+              key={item.id}
+              title={item.reference}
+            >
+              {item.verse}
+            </button>
+          ))}
+        </div>
+      </div>
       <MemorizationText verse={verse} stage={stage} isRevealed={isRevealed} />
       <div className="action-row">
         <button
           type="button"
           className="secondary"
           onClick={onPrevious}
-          disabled={order === 'sequential' && index === 0}
+          disabled={!canGoPrevious}
         >
-          {order === 'random' ? 'Another Verse' : 'Previous'}
+          Previous
         </button>
         {stage !== 'recite' ? (
           <button
