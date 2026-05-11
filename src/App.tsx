@@ -1,13 +1,22 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import type { Session } from '@supabase/supabase-js'
 import './App.css'
 import { actsKjv, chapterVerseCounts, type ScriptureVerse } from './data/actsKjv'
+import {
+  loadCloudProgress,
+  saveCloudProgress,
+  type Grade,
+  type StoredProgress,
+  type StudyMode,
+  type VerseProgress,
+} from './lib/cloudProgress'
+import { isSupabaseConfigured, supabase } from './lib/supabase'
 
-type StudyMode = 'learn' | 'reference' | 'verse' | 'review' | 'quiz'
-type Grade = 'again' | 'hard' | 'good' | 'easy'
 type LearnStage = 'read' | 'hide' | 'letters' | 'recite'
 type LearnOrder = 'sequential' | 'random'
 type QuizPhase = 'ready' | 'buzz' | 'answer' | 'review' | 'scored' | 'complete'
 type QuizQuestionType = 'quotation' | 'completion' | 'reference'
+type SyncStatus = 'local' | 'loading' | 'saved' | 'saving' | 'error'
 
 type QuizQuestion = {
   id: string
@@ -27,24 +36,6 @@ type QuizState = {
   correct: number
   incorrect: number
   noResponses: number
-}
-
-type VerseProgress = {
-  confidence: number
-  attempts: number
-  correct: number
-  streak: number
-  lastReviewed: string | null
-  history: Array<{
-    grade: Grade
-    at: string
-  }>
-}
-
-type StoredProgress = {
-  selectedChapter: number
-  mode: StudyMode
-  verses: Record<string, VerseProgress>
 }
 
 const STORAGE_KEY = 'bible-quiz-acts-kjv-progress-v1'
@@ -197,6 +188,16 @@ function createQuizState(verses: ScriptureVerse[]): QuizState {
 
 function App() {
   const [progress, setProgress] = useState(loadProgress)
+  const [session, setSession] = useState<Session | null>(null)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(
+    isSupabaseConfigured ? 'loading' : 'local',
+  )
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authMode, setAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in')
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [isCloudReady, setIsCloudReady] = useState(false)
+  const skipNextCloudSave = useRef(false)
   const [learnIndex, setLearnIndex] = useState(0)
   const [learnOrder, setLearnOrder] = useState<LearnOrder>('sequential')
   const [learnHistory, setLearnHistory] = useState<string[]>([])
@@ -263,6 +264,107 @@ function App() {
   }, [progress])
 
   useEffect(() => {
+    if (!supabase) return
+
+    let isMounted = true
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!isMounted) return
+      if (error) {
+        setSyncStatus('error')
+        setAuthError(error.message)
+        return
+      }
+      setSession(data.session)
+      if (!data.session) setSyncStatus('local')
+    })
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession)
+      setAuthError(null)
+      setIsCloudReady(false)
+      setSyncStatus(nextSession ? 'loading' : 'local')
+    })
+
+    return () => {
+      isMounted = false
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!supabase || !session?.user.id) return
+
+    let isMounted = true
+    const client = supabase
+    const userId = session.user.id
+
+    loadCloudProgress(client, userId, progress)
+      .then((cloudProgress) => {
+        if (!isMounted) return
+        const hasCloudProgress =
+          Object.keys(cloudProgress.verses).length > 0 ||
+          cloudProgress.selectedChapter !== defaultProgress.selectedChapter ||
+          cloudProgress.mode !== defaultProgress.mode
+
+        if (hasCloudProgress) {
+          skipNextCloudSave.current = true
+          setProgress({ ...progress, ...cloudProgress })
+          setIsCloudReady(true)
+          setSyncStatus('saved')
+          return
+        }
+
+        setSyncStatus('saving')
+        return saveCloudProgress(client, userId, progress).then(() => {
+          if (isMounted) setIsCloudReady(true)
+          if (isMounted) setSyncStatus('saved')
+        })
+      })
+      .then(() => {
+        if (!isMounted) return
+        setIsCloudReady(true)
+        setSyncStatus('saved')
+      })
+      .catch((error: Error) => {
+        if (!isMounted) return
+        setSyncStatus('error')
+        setAuthError(error.message)
+      })
+
+    return () => {
+      isMounted = false
+    }
+    // Load once when a user signs in. Progress changes are handled by the save effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user.id])
+
+  useEffect(() => {
+    if (!supabase || !session?.user.id || !isCloudReady) return
+    const client = supabase
+    const userId = session.user.id
+
+    if (skipNextCloudSave.current) {
+      skipNextCloudSave.current = false
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      setSyncStatus('saving')
+      saveCloudProgress(client, userId, progress)
+        .then(() => setSyncStatus('saved'))
+        .catch((error: Error) => {
+          setSyncStatus('error')
+          setAuthError(error.message)
+        })
+    }, 650)
+
+    return () => window.clearTimeout(timeout)
+  }, [isCloudReady, progress, session?.user.id])
+
+  useEffect(() => {
     if (!quizState || !['buzz', 'answer'].includes(quizState.phase)) return
 
     const timer = window.setTimeout(() => {
@@ -287,6 +389,57 @@ function App() {
 
   function updateProgress(updater: (current: StoredProgress) => StoredProgress) {
     setProgress((current) => updater(current))
+  }
+
+  async function submitAuth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!supabase) return
+
+    setAuthError(null)
+    setSyncStatus('loading')
+
+    const { error } =
+      authMode === 'sign-in'
+        ? await supabase.auth.signInWithPassword({
+            email: authEmail,
+            password: authPassword,
+          })
+        : await supabase.auth.signUp({
+            email: authEmail,
+            password: authPassword,
+          })
+
+    if (error) {
+      setSyncStatus(session ? 'error' : 'local')
+      setAuthError(error.message)
+    }
+  }
+
+  async function signOut() {
+    if (!supabase) return
+    const { error } = await supabase.auth.signOut()
+    if (error) {
+      setSyncStatus('error')
+      setAuthError(error.message)
+      return
+    }
+    setSession(null)
+    setIsCloudReady(false)
+    setSyncStatus('local')
+  }
+
+  async function importLocalProgress() {
+    if (!supabase || !session?.user.id) return
+    setAuthError(null)
+    setSyncStatus('saving')
+    try {
+      await saveCloudProgress(supabase, session.user.id, progress)
+      setIsCloudReady(true)
+      setSyncStatus('saved')
+    } catch (error) {
+      setSyncStatus('error')
+      setAuthError(error instanceof Error ? error.message : 'Could not import local progress.')
+    }
   }
 
   function selectChapter(chapter: number) {
@@ -525,6 +678,22 @@ function App() {
           <h1>Bible Quiz Trainer</h1>
         </div>
 
+        <AccountPanel
+          isConfigured={isSupabaseConfigured}
+          email={session?.user.email ?? null}
+          authEmail={authEmail}
+          authPassword={authPassword}
+          authMode={authMode}
+          syncStatus={syncStatus}
+          error={authError}
+          onAuthEmailChange={setAuthEmail}
+          onAuthPasswordChange={setAuthPassword}
+          onAuthModeChange={setAuthMode}
+          onSubmit={submitAuth}
+          onSignOut={signOut}
+          onImport={importLocalProgress}
+        />
+
         <section className="control-group guide-card" aria-labelledby="start-heading">
           <h2 id="start-heading">Start Here</h2>
           <ol>
@@ -689,6 +858,114 @@ function App() {
       </section>
     </main>
   )
+}
+
+function AccountPanel({
+  isConfigured,
+  email,
+  authEmail,
+  authPassword,
+  authMode,
+  syncStatus,
+  error,
+  onAuthEmailChange,
+  onAuthPasswordChange,
+  onAuthModeChange,
+  onSubmit,
+  onSignOut,
+  onImport,
+}: {
+  isConfigured: boolean
+  email: string | null
+  authEmail: string
+  authPassword: string
+  authMode: 'sign-in' | 'sign-up'
+  syncStatus: SyncStatus
+  error: string | null
+  onAuthEmailChange: (value: string) => void
+  onAuthPasswordChange: (value: string) => void
+  onAuthModeChange: (value: 'sign-in' | 'sign-up') => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onSignOut: () => void
+  onImport: () => void
+}) {
+  return (
+    <section className="control-group account-panel" aria-labelledby="account-heading">
+      <div className="account-heading-row">
+        <h2 id="account-heading">Account</h2>
+        <span className={`sync-pill ${syncStatus}`}>{syncLabel(syncStatus)}</span>
+      </div>
+
+      {!isConfigured && (
+        <p className="account-note">
+          Local progress is enabled. Add Supabase environment variables to turn on multi-device
+          sync.
+        </p>
+      )}
+
+      {isConfigured && email && (
+        <>
+          <p className="account-note">
+            Signed in as <strong>{email}</strong>
+          </p>
+          <div className="account-actions">
+            <button type="button" className="secondary" onClick={onImport}>
+              Save This Browser
+            </button>
+            <button type="button" className="secondary" onClick={onSignOut}>
+              Sign Out
+            </button>
+          </div>
+        </>
+      )}
+
+      {isConfigured && !email && (
+        <form className="auth-form" onSubmit={onSubmit}>
+          <label>
+            <span>Email</span>
+            <input
+              type="email"
+              value={authEmail}
+              onChange={(event) => onAuthEmailChange(event.target.value)}
+              autoComplete="email"
+              required
+            />
+          </label>
+          <label>
+            <span>Password</span>
+            <input
+              type="password"
+              value={authPassword}
+              onChange={(event) => onAuthPasswordChange(event.target.value)}
+              autoComplete={authMode === 'sign-in' ? 'current-password' : 'new-password'}
+              minLength={6}
+              required
+            />
+          </label>
+          <button type="submit" className="primary full-width">
+            {authMode === 'sign-in' ? 'Sign In' : 'Create Account'}
+          </button>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => onAuthModeChange(authMode === 'sign-in' ? 'sign-up' : 'sign-in')}
+          >
+            {authMode === 'sign-in' ? 'Create a new account' : 'Use an existing account'}
+          </button>
+        </form>
+      )}
+
+      {error && <p className="account-error">{error}</p>}
+    </section>
+  )
+}
+
+function syncLabel(status: SyncStatus) {
+  if (status === 'loading') return 'Loading'
+  if (status === 'saving') return 'Saving'
+  if (status === 'saved') return 'Saved'
+  if (status === 'error') return 'Check Sync'
+  return 'Local'
 }
 
 function modeLabel(mode: StudyMode) {

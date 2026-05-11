@@ -48,6 +48,118 @@
   font-size: 14px;
 }
 
+.account-panel {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.account-heading-row,
+.account-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-heading-row {
+  justify-content: space-between;
+}
+
+.sync-pill {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sync-pill.saved {
+  border-color: rgba(33, 122, 63, 0.35);
+  background: rgba(33, 122, 63, 0.1);
+  color: var(--success);
+}
+
+.sync-pill.error {
+  border-color: rgba(148, 98, 30, 0.4);
+  background: rgba(148, 98, 30, 0.1);
+  color: var(--warning);
+}
+
+.sync-pill.saving,
+.sync-pill.loading {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.account-note,
+.account-error {
+  font-size: 13px;
+}
+
+.account-note {
+  color: var(--muted);
+}
+
+.account-note strong {
+  color: var(--ink);
+}
+
+.account-error {
+  color: var(--warning);
+  font-weight: 800;
+}
+
+.account-actions {
+  flex-wrap: wrap;
+}
+
+.auth-form {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.auth-form input {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+}
+
+.auth-form input:focus {
+  outline: 3px solid var(--focus);
+  border-color: var(--accent);
+}
+
+.text-button {
+  min-height: auto;
+  border: 0;
+  padding: 2px;
+  background: transparent;
+  color: var(--accent);
+  text-align: left;
+}
+
+.text-button:hover:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+  text-decoration: underline;
+}
+
 .chapter-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
