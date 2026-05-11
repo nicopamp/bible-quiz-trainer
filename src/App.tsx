@@ -188,8 +188,16 @@ function createQuizState(verses: ScriptureVerse[]): QuizState {
   }
 }
 
-function authErrorMessage(error: Error) {
+function authErrorMessage(error: Error & { code?: string; status?: number }) {
   const message = error.message.toLowerCase()
+  const code = error.code?.toLowerCase() ?? ''
+  if (
+    code.includes('over_email_send_rate_limit') ||
+    message.includes('email rate limit') ||
+    message.includes('email send')
+  ) {
+    return 'Email sign-in is temporarily paused because the site has reached its email-sending limit. Try again later, or ask the site owner to enable custom SMTP.'
+  }
   if (message.includes('rate') || message.includes('too many')) {
     return 'Too many sign-in attempts. Wait a few minutes, then try again.'
   }
