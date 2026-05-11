@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 
 const expectedCounts = { 1: 26, 2: 47, 3: 26, 4: 37, 5: 42, 6: 15, 7: 60, 8: 40, 9: 43 }
-const cacheDir = '/private/tmp/bible-quiz-bg-cache'
+const cacheDir = path.join(os.tmpdir(), 'bible-quiz-bg-cache')
 
 function decodeHtml(input) {
   const named = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
