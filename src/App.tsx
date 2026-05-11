@@ -186,6 +186,21 @@ function createQuizState(verses: ScriptureVerse[]): QuizState {
   }
 }
 
+function authErrorMessage(error: Error) {
+  const message = error.message.toLowerCase()
+  if (message.includes('rate') || message.includes('too many')) {
+    return 'Too many sign-in attempts. Wait a few minutes, then try again.'
+  }
+  if (message.includes('email')) {
+    return 'Check the email address and try again.'
+  }
+  return 'Could not send the sign-in link. Try again in a moment.'
+}
+
+function getMagicLinkRedirectUrl() {
+  return new URL(import.meta.env.BASE_URL, window.location.origin).toString()
+}
+
 function App() {
   const [progress, setProgress] = useState(loadProgress)
   const [session, setSession] = useState<Session | null>(null)
@@ -193,12 +208,11 @@ function App() {
     isSupabaseConfigured ? 'loading' : 'local',
   )
   const [authEmail, setAuthEmail] = useState('')
-  const [authPassword, setAuthPassword] = useState('')
-  const [authMode, setAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in')
   const [authError, setAuthError] = useState<string | null>(null)
   const [authNotice, setAuthNotice] = useState<string | null>(null)
   const [isCloudReady, setIsCloudReady] = useState(false)
   const skipNextCloudSave = useRef(false)
+  const pendingDeletedVerseIds = useRef<string[]>([])
   const [learnIndex, setLearnIndex] = useState(0)
   const [learnOrder, setLearnOrder] = useState<LearnOrder>('sequential')
   const [learnHistory, setLearnHistory] = useState<string[]>([])
@@ -273,7 +287,7 @@ function App() {
       if (!isMounted) return
       if (error) {
         setSyncStatus('error')
-        setAuthError(error.message)
+        setAuthError('Could not restore your session. Please sign in again.')
         return
       }
       setSession(data.session)
@@ -330,10 +344,10 @@ function App() {
         setIsCloudReady(true)
         setSyncStatus('saved')
       })
-      .catch((error: Error) => {
+      .catch(() => {
         if (!isMounted) return
         setSyncStatus('error')
-        setAuthError(error.message)
+        setAuthError('Could not load synced progress. Your browser copy is still safe.')
       })
 
     return () => {
@@ -354,12 +368,18 @@ function App() {
     }
 
     const timeout = window.setTimeout(() => {
+      const deletedVerseIds = [...new Set(pendingDeletedVerseIds.current)]
       setSyncStatus('saving')
-      saveCloudProgress(client, userId, progress)
-        .then(() => setSyncStatus('saved'))
-        .catch((error: Error) => {
+      saveCloudProgress(client, userId, progress, deletedVerseIds)
+        .then(() => {
+          pendingDeletedVerseIds.current = pendingDeletedVerseIds.current.filter(
+            (verseId) => !deletedVerseIds.includes(verseId),
+          )
+          setSyncStatus('saved')
+        })
+        .catch(() => {
           setSyncStatus('error')
-          setAuthError(error.message)
+          setAuthError('Could not save progress. Your browser copy is still safe.')
         })
     }, 650)
 
@@ -401,27 +421,21 @@ function App() {
     setAuthNotice(null)
     setSyncStatus('loading')
 
-    const { data, error } =
-      authMode === 'sign-in'
-        ? await supabase.auth.signInWithPassword({
-            email: authEmail,
-            password: authPassword,
-          })
-        : await supabase.auth.signUp({
-            email: authEmail,
-            password: authPassword,
-          })
+    const { error } = await supabase.auth.signInWithOtp({
+      email: authEmail,
+      options: {
+        emailRedirectTo: getMagicLinkRedirectUrl(),
+      },
+    })
 
     if (error) {
       setSyncStatus(session ? 'error' : 'local')
-      setAuthError(error.message)
+      setAuthError(authErrorMessage(error))
       return
     }
 
-    if (authMode === 'sign-up' && !data.session) {
-      setSyncStatus('local')
-      setAuthNotice('Check your email to confirm the account, then sign in here.')
-    }
+    setSyncStatus('local')
+    setAuthNotice('Check your email for a sign-in link.')
   }
 
   async function signOut() {
@@ -429,11 +443,12 @@ function App() {
     const { error } = await supabase.auth.signOut()
     if (error) {
       setSyncStatus('error')
-      setAuthError(error.message)
+      setAuthError('Could not sign out. Try again in a moment.')
       return
     }
     setSession(null)
     setIsCloudReady(false)
+    pendingDeletedVerseIds.current = []
     setSyncStatus('local')
   }
 
@@ -442,12 +457,16 @@ function App() {
     setAuthError(null)
     setSyncStatus('saving')
     try {
-      await saveCloudProgress(supabase, session.user.id, progress)
+      const deletedVerseIds = [...new Set(pendingDeletedVerseIds.current)]
+      await saveCloudProgress(supabase, session.user.id, progress, deletedVerseIds)
+      pendingDeletedVerseIds.current = pendingDeletedVerseIds.current.filter(
+        (verseId) => !deletedVerseIds.includes(verseId),
+      )
       setIsCloudReady(true)
       setSyncStatus('saved')
-    } catch (error) {
+    } catch {
       setSyncStatus('error')
-      setAuthError(error instanceof Error ? error.message : 'Could not import local progress.')
+      setAuthError('Could not save this browser. Your local progress is still safe.')
     }
   }
 
@@ -612,6 +631,8 @@ function App() {
 
   function resetChapter() {
     const chapterIds = new Set(chapterVerses.map((verse) => verse.id))
+    const deletedVerseIds = Object.keys(progress.verses).filter((verseId) => chapterIds.has(verseId))
+    pendingDeletedVerseIds.current = [...pendingDeletedVerseIds.current, ...deletedVerseIds]
     updateProgress((current) => ({
       ...current,
       verses: Object.fromEntries(
@@ -691,14 +712,10 @@ function App() {
           isConfigured={isSupabaseConfigured}
           email={session?.user.email ?? null}
           authEmail={authEmail}
-          authPassword={authPassword}
-          authMode={authMode}
           syncStatus={syncStatus}
           error={authError}
           notice={authNotice}
           onAuthEmailChange={setAuthEmail}
-          onAuthPasswordChange={setAuthPassword}
-          onAuthModeChange={setAuthMode}
           onSubmit={submitAuth}
           onSignOut={signOut}
           onImport={importLocalProgress}
@@ -874,14 +891,10 @@ function AccountPanel({
   isConfigured,
   email,
   authEmail,
-  authPassword,
-  authMode,
   syncStatus,
   error,
   notice,
   onAuthEmailChange,
-  onAuthPasswordChange,
-  onAuthModeChange,
   onSubmit,
   onSignOut,
   onImport,
@@ -889,14 +902,10 @@ function AccountPanel({
   isConfigured: boolean
   email: string | null
   authEmail: string
-  authPassword: string
-  authMode: 'sign-in' | 'sign-up'
   syncStatus: SyncStatus
   error: string | null
   notice: string | null
   onAuthEmailChange: (value: string) => void
-  onAuthPasswordChange: (value: string) => void
-  onAuthModeChange: (value: 'sign-in' | 'sign-up') => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   onSignOut: () => void
   onImport: () => void
@@ -933,6 +942,7 @@ function AccountPanel({
 
       {isConfigured && !email && (
         <form className="auth-form" onSubmit={onSubmit}>
+          <p className="account-note">Enter your email and we will send a secure sign-in link.</p>
           <label>
             <span>Email</span>
             <input
@@ -943,26 +953,8 @@ function AccountPanel({
               required
             />
           </label>
-          <label>
-            <span>Password</span>
-            <input
-              type="password"
-              value={authPassword}
-              onChange={(event) => onAuthPasswordChange(event.target.value)}
-              autoComplete={authMode === 'sign-in' ? 'current-password' : 'new-password'}
-              minLength={6}
-              required
-            />
-          </label>
           <button type="submit" className="primary full-width">
-            {authMode === 'sign-in' ? 'Sign In' : 'Create Account'}
-          </button>
-          <button
-            type="button"
-            className="text-button"
-            onClick={() => onAuthModeChange(authMode === 'sign-in' ? 'sign-up' : 'sign-in')}
-          >
-            {authMode === 'sign-in' ? 'Create a new account' : 'Use an existing account'}
+            Email Me a Sign-In Link
           </button>
         </form>
       )}

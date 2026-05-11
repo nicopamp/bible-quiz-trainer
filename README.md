@@ -8,7 +8,7 @@ A local-first web app for memorizing Acts 1-9 in the King James Version, one cha
 - Chapter-by-chapter study controls
 - Learn, reference recall, verse-to-reference, and chapter review modes
 - Quiz Prep mode with 20-question rounds, 5-second buzz window, 30-second answer window, and rulebook-style scoring
-- Browser-local progress with optional Supabase account sync across devices
+- Browser-local progress with optional passwordless Supabase account sync across devices
 - Confidence, attempts, streaks, selected study state, and review history persistence
 - Dashboard showing weak, learning, and mastered verse counts
 
@@ -32,6 +32,9 @@ The app works locally without any backend. To enable user accounts and multi-dev
 2. Run `supabase/schema.sql` in the Supabase SQL editor.
 3. Copy `.env.example` to `.env.local` and fill in `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
 4. For GitHub Pages, add the same values as repository secrets or variables and expose them during the build.
+5. In Supabase Auth, add the published site URL to the allowed redirect URLs.
+
+Users sign in with email magic links, so the app does not collect or store passwords.
 
 Only progress and study state are stored per user. The scripture text remains bundled in the app.
 

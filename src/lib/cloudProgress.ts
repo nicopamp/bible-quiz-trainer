@@ -82,6 +82,7 @@ export async function saveCloudProgress(
   client: SupabaseClient,
   userId: string,
   progress: StoredProgress,
+  deletedVerseIds: string[] = [],
 ) {
   const now = new Date().toISOString()
 
@@ -93,9 +94,6 @@ export async function saveCloudProgress(
   })
 
   if (studyStateResult.error) throw studyStateResult.error
-
-  const deleteResult = await client.from('verse_progress').delete().eq('user_id', userId)
-  if (deleteResult.error) throw deleteResult.error
 
   const rows = Object.entries(progress.verses).map(([verseId, verseProgress]) => ({
     user_id: userId,
@@ -109,8 +107,18 @@ export async function saveCloudProgress(
     updated_at: now,
   }))
 
-  if (rows.length === 0) return
+  if (rows.length > 0) {
+    const verseProgressResult = await client.from('verse_progress').upsert(rows)
+    if (verseProgressResult.error) throw verseProgressResult.error
+  }
 
-  const verseProgressResult = await client.from('verse_progress').upsert(rows)
-  if (verseProgressResult.error) throw verseProgressResult.error
+  if (deletedVerseIds.length > 0) {
+    const deleteResult = await client
+      .from('verse_progress')
+      .delete()
+      .eq('user_id', userId)
+      .in('verse_id', deletedVerseIds)
+
+    if (deleteResult.error) throw deleteResult.error
+  }
 }
