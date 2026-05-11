@@ -4,7 +4,7 @@ A local-first web app for memorizing Acts 1-9 in the King James Version, one cha
 
 ## Features
 
-- Bundled public-domain KJV text for Acts 1-9, validated against the KJV version available on Bible Gateway
+- Bundled public-domain KJV text for Acts 1-9
 - Chapter-by-chapter study controls
 - Learn, reference recall, verse-to-reference, and chapter review modes
 - Quiz Prep mode with 20-question rounds, 5-second buzz window, 30-second answer window, and rulebook-style scoring
@@ -31,4 +31,4 @@ npm run build
 npm run validate:scripture
 ```
 
-Bible Gateway lists the King James Version as public domain in the United States and notes that its KJV text matches the 1987 printing. The app bundles Acts 1-9 locally for offline study, links each active verse back to its Bible Gateway KJV passage page, and includes `npm run validate:scripture` to compare every bundled verse against live Bible Gateway KJV passage pages.
+The app bundles Acts 1-9 locally for offline study. The King James Version text is public domain in the United States.

@@ -48,7 +48,6 @@ type StoredProgress = {
 }
 
 const STORAGE_KEY = 'bible-quiz-acts-kjv-progress-v1'
-const bibleGatewayKjvUrl = 'https://www.biblegateway.com/versions/King-James-Version-KJV-Bible/'
 const chapters = Array.from({ length: 9 }, (_, index) => index + 1)
 const learnStages: Array<{ stage: LearnStage; label: string }> = [
   { stage: 'read', label: 'Read' },
@@ -131,10 +130,6 @@ function classify(confidence: number) {
   if (confidence >= 5) return 'mastered'
   if (confidence >= 2) return 'learning'
   return 'weak'
-}
-
-function bibleGatewayPassageUrl(reference: string) {
-  return `https://www.biblegateway.com/passage/?search=${encodeURIComponent(reference)}&version=KJV`
 }
 
 function firstWords(text: string, count: number) {
@@ -528,9 +523,6 @@ function App() {
         <div className="brand-block">
           <span className="eyebrow">Acts 1-9 KJV</span>
           <h1>Bible Quiz Trainer</h1>
-          <a className="source-link" href={bibleGatewayKjvUrl} target="_blank" rel="noreferrer">
-            Bible Gateway KJV · Public Domain
-          </a>
         </div>
 
         <section className="control-group guide-card" aria-labelledby="start-heading">
@@ -625,15 +617,6 @@ function App() {
                 {activeProgress ? ` · Streak ${activeProgress.streak}` : ''}
               </span>
             </div>
-            <a
-              className="passage-link"
-              href={bibleGatewayPassageUrl(activeVerse.reference)}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open {activeVerse.reference} on Bible Gateway
-            </a>
-
             {mode === 'learn' && (
               <LearnCard
                 verse={activeVerse}

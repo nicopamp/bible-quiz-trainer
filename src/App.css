@@ -19,17 +19,6 @@
   gap: 8px;
 }
 
-.source-link {
-  color: var(--accent);
-  font-size: 14px;
-  font-weight: 800;
-  text-decoration: none;
-}
-
-.source-link:hover {
-  text-decoration: underline;
-}
-
 .eyebrow {
   color: var(--muted);
   font-size: 12px;
@@ -156,18 +145,6 @@
   color: var(--muted);
   font-size: 14px;
   font-weight: 700;
-}
-
-.passage-link {
-  justify-self: start;
-  color: var(--accent);
-  font-size: 14px;
-  font-weight: 800;
-  text-decoration: none;
-}
-
-.passage-link:hover {
-  text-decoration: underline;
 }
 
 .prompt-row {
