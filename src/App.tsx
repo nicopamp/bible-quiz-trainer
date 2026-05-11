@@ -2,10 +2,32 @@ import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { actsKjv, chapterVerseCounts, type ScriptureVerse } from './data/actsKjv'
 
-type StudyMode = 'learn' | 'reference' | 'verse' | 'review'
+type StudyMode = 'learn' | 'reference' | 'verse' | 'review' | 'quiz'
 type Grade = 'again' | 'hard' | 'good' | 'easy'
 type LearnStage = 'read' | 'hide' | 'letters' | 'recite'
 type LearnOrder = 'sequential' | 'random'
+type QuizPhase = 'ready' | 'buzz' | 'answer' | 'review' | 'scored' | 'complete'
+type QuizQuestionType = 'quotation' | 'completion' | 'reference'
+
+type QuizQuestion = {
+  id: string
+  pointValue: 10 | 20 | 30
+  type: QuizQuestionType
+  verse: ScriptureVerse
+  prompt: string
+  expected: string
+}
+
+type QuizState = {
+  questions: QuizQuestion[]
+  currentIndex: number
+  phase: QuizPhase
+  secondsLeft: number
+  score: number
+  correct: number
+  incorrect: number
+  noResponses: number
+}
 
 type VerseProgress = {
   confidence: number
@@ -33,6 +55,28 @@ const learnStages: Array<{ stage: LearnStage; label: string }> = [
   { stage: 'hide', label: 'Hide Words' },
   { stage: 'letters', label: 'First Letters' },
   { stage: 'recite', label: 'Recite' },
+]
+const quizPointValues: Array<10 | 20 | 30> = [
+  10,
+  10,
+  10,
+  10,
+  10,
+  10,
+  10,
+  10,
+  20,
+  20,
+  20,
+  20,
+  20,
+  20,
+  20,
+  20,
+  20,
+  30,
+  30,
+  30,
 ]
 const grades: Array<{ grade: Grade; label: string; confidenceDelta: number; correct: boolean }> = [
   { grade: 'again', label: 'Again', confidenceDelta: -2, correct: false },
@@ -93,6 +137,69 @@ function bibleGatewayPassageUrl(reference: string) {
   return `https://www.biblegateway.com/passage/?search=${encodeURIComponent(reference)}&version=KJV`
 }
 
+function firstWords(text: string, count: number) {
+  return text.split(/\s+/).slice(0, count).join(' ')
+}
+
+function remainingAfterCue(text: string, cue: string) {
+  return text.startsWith(cue) ? text.slice(cue.length).trimStart() : text
+}
+
+function makeQuizQuestion(pointValue: 10 | 20 | 30, verse: ScriptureVerse, index: number): QuizQuestion {
+  if (pointValue === 10) {
+    return {
+      id: `quiz-${index}-${verse.id}`,
+      pointValue,
+      type: 'quotation',
+      verse,
+      prompt: `Question number ${index + 1} for 10 points. Quotation Question. Quote verse ${verse.verse} from Acts chapter ${verse.chapter}.`,
+      expected: verse.text,
+    }
+  }
+
+  if (pointValue === 20) {
+    const cue = firstWords(verse.text, Math.min(5, verse.text.split(/\s+/).length))
+    return {
+      id: `quiz-${index}-${verse.id}`,
+      pointValue,
+      type: 'completion',
+      verse,
+      prompt: `Question number ${index + 1} for 20 points. Quotation Completion Question. Finish this verse, quote, "${cue}"`,
+      expected: remainingAfterCue(verse.text, cue),
+    }
+  }
+
+  return {
+    id: `quiz-${index}-${verse.id}`,
+    pointValue,
+    type: 'reference',
+    verse,
+    prompt: `Question number ${index + 1} for 30 points. Give the complete reference for this verse.`,
+    expected: verse.reference,
+  }
+}
+
+function buildQuizRound(verses: ScriptureVerse[]) {
+  const verseQueue = shuffle(verses)
+  return shuffle(quizPointValues).map((pointValue, index) => {
+    const verse = verseQueue[index % verseQueue.length]
+    return makeQuizQuestion(pointValue, verse, index)
+  })
+}
+
+function createQuizState(verses: ScriptureVerse[]): QuizState {
+  return {
+    questions: buildQuizRound(verses),
+    currentIndex: 0,
+    phase: 'ready',
+    secondsLeft: 5,
+    score: 0,
+    correct: 0,
+    incorrect: 0,
+    noResponses: 0,
+  }
+}
+
 function App() {
   const [progress, setProgress] = useState(loadProgress)
   const [learnIndex, setLearnIndex] = useState(0)
@@ -103,6 +210,7 @@ function App() {
   const [isRevealed, setIsRevealed] = useState(false)
   const [learnStage, setLearnStage] = useState<LearnStage>('read')
   const [referenceGuess, setReferenceGuess] = useState('')
+  const [quizState, setQuizState] = useState<QuizState | null>(null)
 
   const selectedChapter = progress.selectedChapter
   const mode = progress.mode
@@ -158,6 +266,29 @@ function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(progress))
   }, [progress])
 
+  useEffect(() => {
+    if (!quizState || !['buzz', 'answer'].includes(quizState.phase)) return
+
+    const timer = window.setTimeout(() => {
+      setQuizState((current) => {
+        if (!current || !['buzz', 'answer'].includes(current.phase)) return current
+        if (current.secondsLeft > 1) return { ...current, secondsLeft: current.secondsLeft - 1 }
+        if (current.phase === 'buzz') {
+          return { ...current, secondsLeft: 0, phase: 'scored', noResponses: current.noResponses + 1 }
+        }
+        return {
+          ...current,
+          secondsLeft: 0,
+          phase: 'scored',
+          score: current.score - current.questions[current.currentIndex].pointValue / 2,
+          incorrect: current.incorrect + 1,
+        }
+      })
+    }, 1000)
+
+    return () => window.clearTimeout(timer)
+  }, [quizState])
+
   function updateProgress(updater: (current: StoredProgress) => StoredProgress) {
     setProgress((current) => updater(current))
   }
@@ -176,6 +307,7 @@ function App() {
     setIsRevealed(false)
     setLearnStage('read')
     setReferenceGuess('')
+    setQuizState(mode === 'quiz' ? createQuizState(nextChapterVerses) : null)
   }
 
   function selectMode(nextMode: StudyMode) {
@@ -191,6 +323,7 @@ function App() {
     setIsRevealed(false)
     setLearnStage('read')
     setReferenceGuess('')
+    setQuizState(nextMode === 'quiz' ? createQuizState(chapterVerses) : null)
   }
 
   function selectLearnOrder(nextOrder: LearnOrder) {
@@ -298,6 +431,54 @@ function App() {
     setIsRevealed(false)
   }
 
+  function restartQuizRound() {
+    setQuizState(createQuizState(chapterVerses))
+  }
+
+  function startQuizQuestion() {
+    setQuizState((current) =>
+      current ? { ...current, phase: 'buzz', secondsLeft: 5 } : createQuizState(chapterVerses),
+    )
+  }
+
+  function buzzIn() {
+    setQuizState((current) =>
+      current ? { ...current, phase: 'answer', secondsLeft: 30 } : current,
+    )
+  }
+
+  function revealQuizAnswer() {
+    setQuizState((current) => (current ? { ...current, phase: 'review' } : current))
+  }
+
+  function scoreQuizQuestion(isCorrect: boolean) {
+    setQuizState((current) => {
+      if (!current) return current
+      const question = current.questions[current.currentIndex]
+      const nextCorrect = current.correct + (isCorrect ? 1 : 0)
+      const quizOutBonus = isCorrect && nextCorrect === 5 ? 20 : 0
+      return {
+        ...current,
+        phase: 'scored',
+        score:
+          current.score + (isCorrect ? question.pointValue + quizOutBonus : -question.pointValue / 2),
+        correct: nextCorrect,
+        incorrect: current.incorrect + (isCorrect ? 0 : 1),
+      }
+    })
+  }
+
+  function nextQuizQuestion() {
+    setQuizState((current) => {
+      if (!current) return current
+      const nextIndex = current.currentIndex + 1
+      if (nextIndex >= current.questions.length) {
+        return { ...current, phase: 'complete' }
+      }
+      return { ...current, currentIndex: nextIndex, phase: 'ready', secondsLeft: 5 }
+    })
+  }
+
   const activeProgress = activeVerse ? getVerseProgress(progress, activeVerse.id) : null
   const referenceMatches =
     activeVerse && normalizeReference(referenceGuess) === normalizeReference(activeVerse.reference)
@@ -319,7 +500,7 @@ function App() {
             <li>Choose the chapter you are learning.</li>
             <li>Stay in Learn until every verse feels familiar.</li>
             <li>Use Reference Recall to answer from the reference.</li>
-            <li>Use Review Next for weak or overdue verses.</li>
+            <li>Use Quiz Prep for a timed 20-question round.</li>
           </ol>
         </section>
 
@@ -347,6 +528,7 @@ function App() {
               ['reference', 'Reference recall'],
               ['verse', 'Find the reference'],
               ['review', 'Review weak verses'],
+              ['quiz', 'Quiz prep round'],
             ].map(([value, label]) => (
               <button
                 type="button"
@@ -385,7 +567,19 @@ function App() {
       <section className="study-area" aria-live="polite">
         <Dashboard dashboard={dashboard} onReview={startBestReview} />
 
-        {activeVerse && (
+        {mode === 'quiz' && (
+          <QuizPrepCard
+            state={quizState ?? createQuizState(chapterVerses)}
+            onStart={startQuizQuestion}
+            onBuzz={buzzIn}
+            onReveal={revealQuizAnswer}
+            onScore={scoreQuizQuestion}
+            onNext={nextQuizQuestion}
+            onRestart={restartQuizRound}
+          />
+        )}
+
+        {mode !== 'quiz' && activeVerse && (
           <article className="drill-panel">
             <div className="panel-topline">
               <span>{modeLabel(mode)}</span>
@@ -484,6 +678,7 @@ function modeLabel(mode: StudyMode) {
   if (mode === 'learn') return 'Learn Mode'
   if (mode === 'reference') return 'Reference Recall'
   if (mode === 'verse') return 'Verse to Reference'
+  if (mode === 'quiz') return 'Quiz Prep'
   return 'Chapter Review'
 }
 
@@ -530,6 +725,175 @@ function Dashboard({
         ))}
       </div>
     </section>
+  )
+}
+
+function QuizPrepCard({
+  state,
+  onStart,
+  onBuzz,
+  onReveal,
+  onScore,
+  onNext,
+  onRestart,
+}: {
+  state: QuizState
+  onStart: () => void
+  onBuzz: () => void
+  onReveal: () => void
+  onScore: (isCorrect: boolean) => void
+  onNext: () => void
+  onRestart: () => void
+}) {
+  const question = state.questions[state.currentIndex]
+  const isOut = state.correct >= 5 || state.incorrect >= 3
+  const statusText =
+    state.correct >= 5
+      ? 'Quizzed out forward: five correct, plus 20 bonus points in a real match.'
+      : state.incorrect >= 3
+        ? 'Quizzed out backward: three incorrect in a real match.'
+        : 'Rulebook rhythm: 5 seconds to buzz, then 30 seconds to answer.'
+
+  return (
+    <article className="drill-panel quiz-panel">
+      <div className="panel-topline">
+        <span>Quiz Prep</span>
+        <span>
+          Question {Math.min(state.currentIndex + 1, state.questions.length)} of{' '}
+          {state.questions.length}
+        </span>
+      </div>
+
+      <div className="quiz-scoreboard">
+        <div>
+          <span>Score</span>
+          <strong>{state.score}</strong>
+        </div>
+        <div>
+          <span>Correct</span>
+          <strong>{state.correct}/5</strong>
+        </div>
+        <div>
+          <span>Incorrect</span>
+          <strong>{state.incorrect}/3</strong>
+        </div>
+        <div>
+          <span>No Response</span>
+          <strong>{state.noResponses}</strong>
+        </div>
+      </div>
+
+      <p className={isOut ? 'quiz-status warning' : 'quiz-status'}>{statusText}</p>
+
+      {state.phase !== 'complete' ? (
+        <>
+          <div className="quiz-question">
+            <span>{question.pointValue} points · {quizTypeLabel(question.type)}</span>
+            <p>{question.prompt}</p>
+          </div>
+
+          {state.phase === 'ready' && (
+            <div className="action-row">
+              <button type="button" className="primary" onClick={onStart}>
+                Read Question
+              </button>
+              <button type="button" className="secondary" onClick={onRestart}>
+                New Round
+              </button>
+            </div>
+          )}
+
+          {state.phase === 'buzz' && (
+            <>
+              <TimerBar secondsLeft={state.secondsLeft} total={5} label="Buzz window" />
+              <div className="action-row">
+                <button type="button" className="primary" onClick={onBuzz}>
+                  Buzz In
+                </button>
+              </div>
+            </>
+          )}
+
+          {state.phase === 'answer' && (
+            <>
+              <TimerBar secondsLeft={state.secondsLeft} total={30} label="Answer window" />
+              <p className="recall-instruction">
+                Give the completion and answer aloud. For quotation questions, use perfect wording.
+              </p>
+              <div className="action-row">
+                <button type="button" className="primary" onClick={onReveal}>
+                  Reveal Answer
+                </button>
+              </div>
+            </>
+          )}
+
+          {(state.phase === 'review' || state.phase === 'scored') && (
+            <>
+              <div className="answer-key">
+                <span>Expected answer</span>
+                <p>{question.expected}</p>
+                {question.type !== 'reference' && <small>{question.verse.reference}</small>}
+              </div>
+              <div className="action-row">
+                {state.phase === 'review' && (
+                  <>
+                    <button type="button" className="primary" onClick={() => onScore(true)}>
+                      Mark Correct
+                    </button>
+                    <button type="button" className="secondary" onClick={() => onScore(false)}>
+                      Mark Incorrect
+                    </button>
+                  </>
+                )}
+                <button type="button" className="secondary" onClick={onNext}>
+                  Next Question
+                </button>
+              </div>
+            </>
+          )}
+        </>
+      ) : (
+        <div className="quiz-complete">
+          <strong>Round complete</strong>
+          <p>
+            Final score: {state.score}. Correct: {state.correct}. Incorrect: {state.incorrect}. No
+            response: {state.noResponses}.
+          </p>
+          <button type="button" className="primary" onClick={onRestart}>
+            Start New Round
+          </button>
+        </div>
+      )}
+    </article>
+  )
+}
+
+function quizTypeLabel(type: QuizQuestionType) {
+  if (type === 'quotation') return 'Quotation Question'
+  if (type === 'completion') return 'Quotation Completion'
+  return 'Complete Reference'
+}
+
+function TimerBar({
+  secondsLeft,
+  total,
+  label,
+}: {
+  secondsLeft: number
+  total: number
+  label: string
+}) {
+  return (
+    <div className="timer-block">
+      <div>
+        <span>{label}</span>
+        <strong>{secondsLeft}s</strong>
+      </div>
+      <div className="timer-track" aria-hidden="true">
+        <span style={{ width: `${Math.max(0, (secondsLeft / total) * 100)}%` }} />
+      </div>
+    </div>
   )
 }
 

@@ -321,6 +321,124 @@
   font-weight: 800;
 }
 
+.quiz-panel {
+  align-self: start;
+}
+
+.quiz-scoreboard {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.quiz-scoreboard div {
+  display: grid;
+  gap: 4px;
+  min-height: 76px;
+  align-content: center;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.quiz-scoreboard span,
+.quiz-question span,
+.answer-key span,
+.timer-block span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.quiz-scoreboard strong {
+  color: var(--ink);
+  font-size: 28px;
+  line-height: 1;
+}
+
+.quiz-status {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.quiz-status.warning {
+  border-color: rgba(148, 98, 30, 0.4);
+  background: rgba(148, 98, 30, 0.1);
+  color: var(--warning);
+}
+
+.quiz-question,
+.answer-key,
+.quiz-complete {
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.quiz-question p,
+.answer-key p {
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 28px;
+  line-height: 1.38;
+}
+
+.answer-key small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.timer-block {
+  display: grid;
+  gap: 10px;
+}
+
+.timer-block > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.timer-block strong {
+  color: var(--ink);
+  font-size: 32px;
+}
+
+.timer-track {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--track);
+}
+
+.timer-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.recall-instruction,
+.quiz-complete p {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.quiz-complete strong {
+  color: var(--ink);
+  font-size: 32px;
+}
+
 .answer-field {
   display: grid;
   gap: 8px;
@@ -473,6 +591,10 @@ button.secondary {
     grid-template-columns: 1fr;
   }
 
+  .quiz-scoreboard {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .prompt-row,
   .panel-topline {
     align-items: flex-start;
@@ -490,6 +612,11 @@ button.secondary {
   .scripture-text {
     min-height: 150px;
     padding: 20px;
+    font-size: 22px;
+  }
+
+  .quiz-question p,
+  .answer-key p {
     font-size: 22px;
   }
 

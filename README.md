@@ -7,6 +7,7 @@ A local-first web app for memorizing Acts 1-9 in the King James Version, one cha
 - Bundled public-domain KJV text for Acts 1-9, validated against the KJV version available on Bible Gateway
 - Chapter-by-chapter study controls
 - Learn, reference recall, verse-to-reference, and chapter review modes
+- Quiz Prep mode with 20-question rounds, 5-second buzz window, 30-second answer window, and rulebook-style scoring
 - Browser-local progress with confidence, attempts, streaks, and review history
 - Dashboard showing weak, learning, and mastered verse counts
 
