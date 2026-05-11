@@ -96,7 +96,8 @@
 }
 
 .account-note,
-.account-error {
+.account-error,
+.account-notice {
   font-size: 13px;
 }
 
@@ -110,6 +111,11 @@
 
 .account-error {
   color: var(--warning);
+  font-weight: 800;
+}
+
+.account-notice {
+  color: var(--success);
   font-weight: 800;
 }
 

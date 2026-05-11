@@ -196,6 +196,7 @@ function App() {
   const [authPassword, setAuthPassword] = useState('')
   const [authMode, setAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in')
   const [authError, setAuthError] = useState<string | null>(null)
+  const [authNotice, setAuthNotice] = useState<string | null>(null)
   const [isCloudReady, setIsCloudReady] = useState(false)
   const skipNextCloudSave = useRef(false)
   const [learnIndex, setLearnIndex] = useState(0)
@@ -284,6 +285,7 @@ function App() {
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession)
       setAuthError(null)
+      setAuthNotice(null)
       setIsCloudReady(false)
       setSyncStatus(nextSession ? 'loading' : 'local')
     })
@@ -396,9 +398,10 @@ function App() {
     if (!supabase) return
 
     setAuthError(null)
+    setAuthNotice(null)
     setSyncStatus('loading')
 
-    const { error } =
+    const { data, error } =
       authMode === 'sign-in'
         ? await supabase.auth.signInWithPassword({
             email: authEmail,
@@ -412,6 +415,12 @@ function App() {
     if (error) {
       setSyncStatus(session ? 'error' : 'local')
       setAuthError(error.message)
+      return
+    }
+
+    if (authMode === 'sign-up' && !data.session) {
+      setSyncStatus('local')
+      setAuthNotice('Check your email to confirm the account, then sign in here.')
     }
   }
 
@@ -686,6 +695,7 @@ function App() {
           authMode={authMode}
           syncStatus={syncStatus}
           error={authError}
+          notice={authNotice}
           onAuthEmailChange={setAuthEmail}
           onAuthPasswordChange={setAuthPassword}
           onAuthModeChange={setAuthMode}
@@ -868,6 +878,7 @@ function AccountPanel({
   authMode,
   syncStatus,
   error,
+  notice,
   onAuthEmailChange,
   onAuthPasswordChange,
   onAuthModeChange,
@@ -882,6 +893,7 @@ function AccountPanel({
   authMode: 'sign-in' | 'sign-up'
   syncStatus: SyncStatus
   error: string | null
+  notice: string | null
   onAuthEmailChange: (value: string) => void
   onAuthPasswordChange: (value: string) => void
   onAuthModeChange: (value: 'sign-in' | 'sign-up') => void
@@ -956,6 +968,7 @@ function AccountPanel({
       )}
 
       {error && <p className="account-error">{error}</p>}
+      {notice && <p className="account-notice">{notice}</p>}
     </section>
   )
 }
